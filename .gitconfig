@@ -1,6 +1,6 @@
 [alias]
   co = "!git checkout"
-  review = "!git diff --cached $against | grep -E '^\+.*(debugger|exit|fixme|todo).*' -i"
+  review = "!git diff --cached | grep -E '^\\+.*(debugger|exit|fixme|todo).*' -i"
   add-review = "!git add . && !git review"
   review-long = "!git add-review >> ~/Downloads/review.txt"
   code-changes = "!git log --format=format: --name-only | egrep -v '^$' | sort | uniq -c | sort -rg | head -10"
