@@ -1,29 +1,124 @@
-#!/bin/sh
-#
-# An example hook script to verify what is about to be committed.
-# Called by "git commit" with no arguments.  The hook should
-# exit with non-zero status after issuing an appropriate message if
-# it wants to stop the commit.
-#
-# To enable this hook, rename this file to "pre-commit".
+#!/usr/bin/env ruby
+# frozen_string_literal: true
 
-if git rev-parse --verify HEAD >/dev/null 2>&1
-then
-	against=HEAD
-else
-	# Initial commit: diff against an empty tree object
-	against=$(git hash-object -t tree /dev/null)
-fi
-commit=`git diff --cached $against | grep -E '^\+.*(debugger|exit).*' -i`
-if [ -n "$commit" ]
-then
-    echo "Don't commit with debugger or exit"
-    exit 1
-fi
-commit=`git diff --cached $against | grep -E '^\+.*(fixme|todo).*' -i`
-if [ -n "$commit" ]
-then
-    echo "Found a TODO or FIXME"
-    exit 2
-fi
-exit 0
+# this file needs execute access
+
+def run_rubocop(file)
+  # Run static code analysis on changed file
+  output = `rubocop #{file} --format simple`
+
+  # Get exit code of Robocop. Returns a non-zero exit code if it fails.
+  exit_code = $?.to_i
+
+  # If Rubocop is not installed, handle gracefully.
+  if exit_code == 127
+    puts('It appears that Rubocop is not installed. Please run `bundle install` or `gem install rubocop.`')
+    exit(0)
+  end
+
+  # Grab all lines of the output.
+  lines = output.split("\n")
+
+  # 2nd through -3rd line are the actual errors
+  errors = lines[1..-3]
+
+  return {} if exit_code.zero?
+
+  # The commit will fail
+  return {
+    should_fail: true,
+    broken_file: {
+      path: file,
+      errors: errors
+    }
+  }
+end
+
+def run_eslint(file)
+  # Run static code analysis on changed file
+  output = `eslint #{file} -f stylish`
+
+  # Get exit code of Robocop. Returns a non-zero exit code if it fails.
+  exit_code = $?.to_i
+
+  # If Rubocop is not installed, handle gracefully.
+  if exit_code == 32_512
+    puts('It appears that ESLint is not installed. Please run `yarn install`')
+    exit(0)
+  end
+
+  # Grab all lines of the output.
+  lines = output.split("\n")
+
+  # 3rd through -4thrd line are the actual errors
+  errors = lines[2..-4]
+
+  return {} if exit_code.zero?
+
+  # The commit will fail
+  return {
+    should_fail: true,
+    broken_file: {
+      path: file,
+      errors: errors
+    }
+  }
+end
+
+def print_lint_errors(results, node, type)
+  return if results[node].size.zero?
+
+  error_count = 0
+
+  # Produce a nice output for the user.
+  results[node].each do |file|
+    puts("  - #{file[:path]}")
+
+    file[:errors].each do |error|
+      error_count += 1
+      puts("    #{error}")
+    end
+
+    print("\n")
+  end
+
+  puts("Detected #{error_count} #{type} errors in #{results[node].size} files.")
+end
+
+# Grab a list of staged changed files
+changed_files = `git diff --name-only HEAD`.split("\n")
+
+results = {
+  should_fail: false,
+  broken_rb_files: [],
+  broken_js_files: []
+}
+
+changed_files.each do |file|
+  case File.extname(file)
+  when '.rb'
+    file_results = run_rubocop(file)
+    broken_file = :broken_rb_files
+  when '.js'
+    file_results = run_eslint(file)
+    broken_file = :broken_js_files
+  else
+    file_results = {}
+  end
+
+  if file_results[:should_fail]
+    results[:should_fail] = true
+    results[broken_file] << file_results[:broken_file]
+  end
+end
+
+if results[:should_fail]
+  puts('Static Code Analysis Failed')
+  puts('---------------------------')
+
+  print_lint_errors(results, :broken_rb_files, 'Ruby')
+  print_lint_errors(results, :broken_js_files, 'JS')
+
+  # Do not allow them to commit.
+  exit 1
+end
